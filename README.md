@@ -2,14 +2,6 @@
 
 ## Usage
 
-### Debian / Ubuntu
-
 ```bash
-git clone https://github.com/DeltaBG/icinga2-plugins.git /usr/lib/nagios/plugins/delta
-```
-
-### RHEL / CentOS / AlmaLinux
-
-```bash
-git clone https://github.com/DeltaBG/icinga2-plugins.git /usr/lib64/nagios/plugins/delta
+git clone https://github.com/DeltaBG/icinga2-plugins.git $(icinga2 variable get PluginDir)/delta
 ```
