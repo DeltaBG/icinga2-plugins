@@ -40,7 +40,7 @@ fi
 
 if [ $metric == heap ]; then
     if [[ ! -z ${username} || ! -z ${password} ]]; then
-        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit} -username ${username} -password "${password}"`
+        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
     else
         output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit}`
     fi
@@ -92,7 +92,7 @@ if [ $metric == heap ]; then
 
 elif [ $metric == threads ]; then
     if [[ ! -z ${username} || ! -z ${password} ]]; then
-        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit} -username ${username} -password "${password}"`
+        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
     else
         output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit}`
     fi
@@ -121,8 +121,8 @@ elif [ $metric == threads ]; then
 
 elif [ $metric == jdbc ]; then
     if [[ ! -z ${username} || ! -z ${password} ]]; then
-        active=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit} -username "${username}" -password "${password}"`
-        idle=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit} -username ${username} -password "${password}"`
+        active=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit} -username "${username}" -password ${password}`
+        idle=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
     else
         active=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit}`
         idle=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit}`
@@ -166,7 +166,7 @@ elif [ $metric == mq ]; then
         do
 
         if [[ ! -z ${username} || ! -z ${password} ]]; then
-            tmp_var=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit} -username ${username} -password "${password}"`
+            tmp_var=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
         else
             tmp_var=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit}`
         fi
