@@ -1,5 +1,7 @@
 #!/bin/bash
 
+_plugin_dir=$(dirname $(readlink -f $0))
+
 function help {
 echo -e "\nPlease use either heap or threads as metric arguments (-m).
             Warning and Critical values in bytes(for heap)
@@ -40,9 +42,9 @@ fi
 
 if [ $metric == heap ]; then
     if [[ ! -z ${username} || ! -z ${password} ]]; then
-        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
+        output=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
     else
-        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit}`
+        output=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Memory -A HeapMemoryUsage -K used -I HeapMemoryUsage -J used -vvvv -w ${warn} -c ${crit}`
     fi
 
     if [[ $output == *Exception* ]]; then
@@ -92,9 +94,9 @@ if [ $metric == heap ]; then
 
 elif [ $metric == threads ]; then
     if [[ ! -z ${username} || ! -z ${password} ]]; then
-        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
+        output=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
     else
-        output=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit}`
+        output=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O java.lang:type=Threading -A ThreadCount -K Total -vvvv -w ${warn} -c ${crit}`
     fi
 
     if [[ $output == *Exception* ]]; then
@@ -121,11 +123,11 @@ elif [ $metric == threads ]; then
 
 elif [ $metric == jdbc ]; then
     if [[ ! -z ${username} || ! -z ${password} ]]; then
-        active=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit} -username "${username}" -password ${password}`
-        idle=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
+        active=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit} -username "${username}" -password ${password}`
+        idle=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
     else
-        active=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit}`
-        idle=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit}`
+        active=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumActive -vvvv -w ${warn} -c ${crit}`
+        idle=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O 'org.apache.tomcat.jdbc.pool.jmx:name=dataSourceMBean,type=ConnectionPool' -A NumIdle -vvvv -w ${warn} -c ${crit}`
     fi
     if [[ $active == *Exception* ]] || [[ $idle == *Exception* ]]; then
         echo "Critical: jmx pull failed"
@@ -166,9 +168,9 @@ elif [ $metric == mq ]; then
         do
 
         if [[ ! -z ${username} || ! -z ${password} ]]; then
-            tmp_var=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
+            tmp_var=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit} -username ${username} -password ${password}`
         else
-            tmp_var=`./check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit}`
+            tmp_var=`${_plugin_dir}/check_jmx -U service:jmx:rmi:///jndi/rmi://${url}:${port}/jmxrmi -O "org.apache.activemq:type=Broker,brokerName=notificationBroker,destinationType=Queue,destinationName=${i}" -A ${y} -vvvv -w ${warn} -c ${crit}`
         fi
 
         if [[ $tmp_var == *Exception* ]]; then
