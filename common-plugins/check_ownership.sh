@@ -40,10 +40,9 @@ done
 OUTPUT=`eval "$FIND_BIN $DIR ! -user $USER -or ! -group $GROUP"`
 
 if [ -z "$OUTPUT" ]; then
-    echo "OK: No files or directories found with user '$USER' or '$GROUP' group."
+    echo "OK: No files or directories with permissions other than user '$USER' or group '$GROUP'."
     exit $OK
 else
-    echo "WARNING: Found '$(echo $OUTPUT | wc -l)' files or directories with user '$USER' or '$GROUP' group."
-    echo $OUTPUT
+    echo "WARNING: Found '$(echo $OUTPUT | wc -l)' files or directories with permissions other than user '$USER' or group '$GROUP'."
     exit $WARNING
 fi
