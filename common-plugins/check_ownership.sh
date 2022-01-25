@@ -50,11 +50,11 @@ if [ -z "$OUTPUT" ]; then
     echo "OK: No files or directories with permissions other than user '$USER' or group '$GROUP'."
     exit $OK
 else
-    NUM_FOUND=$(echo -e $OUTPUT | sed 's/ /\n/' | wc -l)
+    NUM_FOUND=$(echo -e $OUTPUT | sed 's/ /\n/g' | wc -l)
     echo "WARNING: Found '$NUM_FOUND' files or directories with permissions other than user '$USER' or group '$GROUP'."
     if $SHOW; then
         echo Found:
-        echo -e $OUTPUT | sed 's/ /\n/'
+        echo -e $OUTPUT | sed 's/ /\n/g'
     fi
     exit $WARNING
 fi
