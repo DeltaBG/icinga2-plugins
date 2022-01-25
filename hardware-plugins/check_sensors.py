@@ -39,7 +39,7 @@ if os.path.isfile(SENSORS_BIN) and os.access(SENSORS_BIN, os.X_OK):
         warn = float(line[2]) + TSHIFT
         crit = float(line[3]) + TSHIFT
 
-        GRAPHS = GRAPHS + sensor + "=" + str(temp) + " "
+        GRAPHS = GRAPHS + sensor + "=" + str(temp) + ";" + str(warn) + ";" + str(crit) + "; "
 
         if warn <= temp < crit and STATE != "CRITICAL":
             STATE = "WARNING"
