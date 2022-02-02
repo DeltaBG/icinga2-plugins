@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
 #  Copyright (c) 2014 Catalyst IT http://www.catalyst.net.nz
