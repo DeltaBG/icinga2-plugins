@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Version 0.0.1 - Jan/2022
+# Version 0.0.2 - Feb/2022
 # by Nedelin Petkov
 
 import os
@@ -8,7 +8,7 @@ import sys
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-s', '--shift', metavar='SHIFT', default=-20, help='Shifts the thresholds for critical and warning. Default: -20')
+parser.add_argument('-s', '--shift', metavar='SHIFT', default=-15, help='Shifts the thresholds for critical and warning. Default: -15')
 parser.add_argument('-e', '--exe', metavar='EXE', default='/usr/bin/sensors', help='Path to sensors. Default: /usr/bin/sensors')
 args = parser.parse_args()
 
@@ -28,13 +28,20 @@ GRAPHS = ""
 
 if os.path.isfile(SENSORS_BIN) and os.access(SENSORS_BIN, os.X_OK):
 
+    _current_cpu = "0"
+
     stream = os.popen(SENSORS_BIN)
     output = stream.read()
 
     output_regex = re.compile(r'^(.*):.*(\+[0-9]+.[0-9]).*\(high.*(\+[0-9]+.[0-9]).*crit.*(\+[0-9]+.[0-9]).*\)', re.MULTILINE)
 
     for line in output_regex.findall(output):
-        sensor = line[0].replace(" ", "_")
+        if line[0].startswith('Physical id'):
+            _current_cpu = re.search("Physical id ([0-9]+)", line[0]).group(1)
+        if line[0].startswith('Core'):
+            sensor = "CPU" + _current_cpu + "_" + line[0].replace(" ", "")
+        else:
+            sensor = line[0].replace(" ", "_")
         temp = float(line[1])
         warn = float(line[2]) + TSHIFT
         crit = float(line[3]) + TSHIFT
@@ -48,11 +55,6 @@ if os.path.isfile(SENSORS_BIN) and os.access(SENSORS_BIN, os.X_OK):
         elif temp >= crit:
             STATE = "CRITICAL"
             MESSAGE = "Some of the sensors are above the critical level."
-
-        # print( "Sensor: " + str(sensor) )
-        # print( "Temp: " + str(temp) )
-        # print( "Warn: " + str(warn) )
-        # print( "Crit: " + str(crit) )
 
 else:
     STATE = "UNKNOWN"
