@@ -3780,7 +3780,7 @@ $fatpacked{"App/Monitoring/Plugin/CheckRaid/Plugins/megacli.pm"} = '#line '.(1+_
   use warnings;
   
   sub program_names {
-  	qw(MegaCli64 MegaCli megacli storcli storcli64);
+  	qw(MegaCli64 MegaCli megacli storcli storcli64 perccli perccli64);
   }
   
   sub commands {
