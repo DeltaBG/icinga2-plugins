@@ -109,6 +109,18 @@ def main():
 
     for osd in osds_up:
         daemon_ceph_cmd = [ceph_exec, '--format', 'json']
+        if args.monaddress:
+            daemon_ceph_cmd.append('-m')
+            daemon_ceph_cmd.append(args.monaddress)
+        if args.conf:
+            daemon_ceph_cmd.append('-c')
+            daemon_ceph_cmd.append(args.conf)
+        if args.id:
+            daemon_ceph_cmd.append('--id')
+            daemon_ceph_cmd.append(args.id)
+        if args.keyring:
+            daemon_ceph_cmd.append('--keyring')
+            daemon_ceph_cmd.append(args.keyring)
         daemon_ceph_cmd.append('daemon')
         daemon_ceph_cmd.append(osd)
         daemon_ceph_cmd.append('perf')
