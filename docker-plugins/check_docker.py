@@ -556,7 +556,8 @@ def check_health(container):
         else:
             unknown(message)
     else:
-        unknown('{} has no health check data'.format(container))
+        if not no_health:
+            unknown('{} has no health check data'.format(container))
 
 
 @multithread_execution()
@@ -836,6 +837,12 @@ def process_args(args):
                         action='store_true',
                         help='Make output terse suppressing OK messages. If all checks are OK return a single OK.')
 
+    # no-health
+    parser.add_argument('--no-health',
+                        dest='no_health',
+                        action='store_true',
+                        help='Do not parse docker containers which do not have health status.')
+
     # no-performance
     parser.add_argument('--no-performance',
                         dest='no_performance',
@@ -917,6 +924,9 @@ def perform_checks(raw_args):
 
     global no_ok
     no_ok = args.no_ok
+
+    global no_health
+    no_health = args.no_health
 
     global no_performance
     no_performance = args.no_ok
