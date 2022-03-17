@@ -558,6 +558,8 @@ def check_health(container):
     else:
         if not no_health:
             unknown('{} has no health check data'.format(container))
+        else:
+            ok("OK")
 
 
 @multithread_execution()
