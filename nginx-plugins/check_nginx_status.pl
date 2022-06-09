@@ -18,7 +18,7 @@ use FindBin;
 binmode(STDOUT, ":utf8");
 
 # Nagios specific
-use lib "$FindBin::Bin/../../../";
+use lib "$FindBin::Bin/../../";
 use utils qw($TIMEOUT);
 
 # Globals
