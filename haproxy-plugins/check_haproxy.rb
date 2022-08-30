@@ -150,6 +150,8 @@ end
 
 header = nil
 
+performance_data = '|'
+
 haproxy_response(options).each do |line|
   if line =~ /^# /
     header = line[2..-1].split(',')
@@ -181,15 +183,16 @@ haproxy_response(options).each do |line|
                     session_percent_usage,
                     row['smax']
                    )
-  performance_data = sprintf("|" + row['svname'] + "=" +
-                            row['scur'] +
-			    ";;" + 
-                            row['slim'] + ";" +
-                            "0" + ";" +
-                            row['slim']
-                            )
+  performance_data = performance_data + sprintf(" " + row['pxname'].gsub('.', '_') + "_" + 
+			                       row['svname'].gsub('.', '_') + "=" +
+                                               row['scur'] +
+			                       ";;" + 
+                                               row['slim'] + ";" +
+                                               "0" + ";" +
+                                               row['slim']
+                                               )
 
-  @proxies << message + performance_data
+  @proxies << message
 
   if role == :act && row['status'] == 'DOWN'
     err_level = row['svname'] == 'BACKEND' ? CRITICAL : WARNING
@@ -203,7 +206,9 @@ haproxy_response(options).each do |line|
   end
 end
 
-@errors[OK] << "#{@proxies.length} proxies found|proxies=#{@proxies.length}"
+@proxies << performance_data + " proxies=#{@proxies.length}"
+
+@errors[OK] << "#{@proxies.length} proxies found"
 
 @errors[UNKNOWN] << "No proxies listed as up or down" if @proxies.empty?
 
