@@ -16,6 +16,7 @@ function help {
 				-l \"/var/log/rnsapshot.log\"
 				-l \"/var/log/rsnapshot*\"
 		-n    = period (count n number of backup runs)
+		-i    = ignore backups with warnings
 		-h    = this help
 
 	"
@@ -26,17 +27,19 @@ if [[ "$#" -eq 0 ]]; then
 	help
 fi
 
+IGNORE_WARN=0
 WARN=1
 CRIT=2
 COUNT=7
 LOGS=/var/log/rsnapshot*.log
 
-while getopts "w:c:l:n:h" OPT; do
+while getopts "w:c:l:n:ih" OPT; do
     case $OPT in
         "w") WARN=$OPTARG;;
         "c") CRIT=$OPTARG;;
         "l") LOGS=$OPTARG;;
         "n") COUNT=$OPTARG;;
+		"i") IGNORE_WARN=1;;
         "h") help;;
 		\? ) echo "Unknown option!"; help;;
          : ) echo "Missing option arguments."; help;;
