@@ -55,14 +55,19 @@ if (( $WARN >= $CRIT )); then
 fi
 
 FAILED_BACKUPS=0
+WARN_BACKUPS=0
 LEVEL=0
 
 for i in $(ls $LOGS); do
-	FAILED=`grep ": completed" $i | tail -n ${COUNT} | grep -ve "successfully" | wc -l`
-    if [ "$FAILED" -gt 0 ]; then	
-		FAILED_BACKUPS=$(( $FAILED_BACKUPS + $FAILED ))
-	fi
+	FAILED=`grep ": completed" $i | tail -n ${COUNT} | grep "error" | wc -l`
+	WARNS=`grep ": completed" $i | tail -n ${COUNT} | grep "warning" | wc -l`	
+	FAILED_BACKUPS=$(( $FAILED_BACKUPS + $FAILED ))
+	WARN_BACKUPS=$(( $WARN_BACKUPS + $WARNS ))
 done
+
+if (( $WARN_BACKUPS > 0 && $IGNORE_WARN == 0 )); then
+	LEVEL=1
+fi
 
 if (( $FAILED_BACKUPS >= $WARN && $FAILED_BACKUPS < $CRIT )); then
 	LEVEL=1
@@ -73,13 +78,13 @@ if (( $FAILED_BACKUPS >= $CRIT )); then
 fi
 
 case $LEVEL in
-	0)  echo "OK - $FAILED_BACKUPS failed during last ${COUNT} backup runs."
+	0)  echo "OK - $FAILED_BACKUPS failed and $WARN_BACKUPS warnings for the last ${COUNT} backup runs."
 		exit $EXIT_OK
 	    	;;
-	1)	echo "WARNING - $FAILED_BACKUPS failed during last ${COUNT} backup runs."
+	1)	echo "WARNING - $FAILED_BACKUPS failed and $WARN_BACKUPS warnings for the last ${COUNT} backup runs."
 		exit $EXIT_WARN
 		;;
-	2)	echo "CRITICAL - $FAILED_BACKUPS failed during last ${COUNT} backup runs."
+	2)	echo "CRITICAL - $FAILED_BACKUPS failed and $WARN_BACKUPS warnings for the last ${COUNT} backup runs."
 		exit $EXIT_CRIT
 		;;
 esac	
