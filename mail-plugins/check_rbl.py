@@ -97,7 +97,7 @@ serverlist = [
     "query.senderbase.org",
     "bogons.cymru.com",
     "csi.cloudmark.com",
-    "truncate.gbudb.net"
+    # "truncate.gbudb.net"
 ]
 
 ####
