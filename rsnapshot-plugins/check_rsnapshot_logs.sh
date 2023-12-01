@@ -59,8 +59,8 @@ WARN_BACKUPS=0
 LEVEL=0
 
 for i in $(ls $LOGS); do
-	FAILED=`grep "ERROR:" $i | tail -n ${COUNT} | wc -l`
-	WARNS=`grep "WARNING:" $i | tail -n ${COUNT} | wc -l`
+	FAILED=`grep -i "error" $i | tail -n ${COUNT} | wc -l`
+	WARNS=`grep -i "warning" $i | tail -n ${COUNT} | wc -l`
 	FAILED_BACKUPS=$(( $FAILED_BACKUPS + $FAILED ))
 	WARN_BACKUPS=$(( $WARN_BACKUPS + $WARNS ))
 done
