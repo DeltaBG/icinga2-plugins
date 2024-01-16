@@ -31,6 +31,7 @@ IGNORE_WARN=0
 WARN=1
 CRIT=2
 COUNT=7
+LINES=$(($COUNT*2))
 LOGS=/var/log/rsnapshot*.log
 
 while getopts "w:c:l:n:ih" OPT; do
@@ -59,8 +60,8 @@ WARN_BACKUPS=0
 LEVEL=0
 
 for i in $(ls $LOGS); do
-	FAILED=`grep "completed" $i | tail -n ${COUNT} | grep -i "error" |  wc -l`
-	WARNS=`grep "completed" $i | tail -n ${COUNT} | grep -i "warning" | wc -l`
+	FAILED=`tail -n $LINES $i | grep -i "error" |  wc -l`
+	WARNS=`tail -n $LINES $i | grep -i "warning" | wc -l`
 	FAILED_BACKUPS=$(( $FAILED_BACKUPS + $FAILED ))
 	WARN_BACKUPS=$(( $WARN_BACKUPS + $WARNS ))
 done
