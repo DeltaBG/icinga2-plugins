@@ -31,7 +31,6 @@ IGNORE_WARN=0
 WARN=1
 CRIT=2
 COUNT=7
-LINES=$(($COUNT*2))
 LOGS=/var/log/rsnapshot*.log
 
 while getopts "w:c:l:n:ih" OPT; do
@@ -49,6 +48,8 @@ while getopts "w:c:l:n:ih" OPT; do
         	 ;;
     esac
 done
+
+LINES=$(($COUNT*2))
 
 if (( $WARN >= $CRIT )); then
 	echo "UNKNOWN - WARNING value should be lower than CRITICAL value."
