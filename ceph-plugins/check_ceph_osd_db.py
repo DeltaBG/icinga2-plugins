@@ -26,6 +26,7 @@ import json
 
 
 CEPH_COMMAND = '/usr/bin/ceph'
+SOCKER_DIR = '/var/run/ceph/'
 
 STATUS_OK = 0
 STATUS_CRITICAL = 2
@@ -42,6 +43,7 @@ def main():
     parser.add_argument('-k','--keyring', help='ceph client keyring file')
     parser.add_argument('-H','--host', help='osd host', required=True)
     parser.add_argument('-C','--critical', help='critical threshold', default=60)
+    parser.add_argument('-s','--socket-dir', help='Admin socket dir. Default [%s]' % SOCKER_DIR, default=SOCKER_DIR)
 
     args = parser.parse_args()
 
@@ -122,7 +124,7 @@ def main():
             daemon_ceph_cmd.append('--keyring')
             daemon_ceph_cmd.append(args.keyring)
         daemon_ceph_cmd.append('daemon')
-        daemon_ceph_cmd.append(osd)
+        daemon_ceph_cmd.append('%s/ceph-%s.asok' % (args.socket_dir, osd))
         daemon_ceph_cmd.append('perf')
         daemon_ceph_cmd.append('dump')
 
