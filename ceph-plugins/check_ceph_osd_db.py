@@ -110,7 +110,7 @@ def main():
     lines = []
 
     for osd in osds_up:
-        daemon_ceph_cmd = [ceph_exec, '--format', 'json']
+        daemon_ceph_cmd = ['sudo', ceph_exec, '--format', 'json']
         if args.monaddress:
             daemon_ceph_cmd.append('-m')
             daemon_ceph_cmd.append(args.monaddress)
