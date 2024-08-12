@@ -27,6 +27,7 @@ import json
 
 CEPH_COMMAND = '/usr/bin/ceph'
 SOCKER_DIR = '/var/run/ceph/'
+DEFAULT_CLUSTER = 'ceph'
 
 STATUS_OK = 0
 STATUS_CRITICAL = 2
@@ -55,6 +56,11 @@ def main():
     if args.conf and not os.path.exists(args.conf):
         print("UNKNOWN: ceph conf file '%s' doesn't exist" % args.conf)
         return STATUS_UNKNOWN
+
+    if args.conf:
+        cluster = args.conf.split('/')[-1].split('.')[0]
+    else:
+        cluster = DEFAULT_CLUSTER
 
     if args.keyring and not os.path.exists(args.keyring):
         print("UNKNOWN: keyring file '%s' doesn't exist" % args.keyring)
@@ -124,7 +130,7 @@ def main():
             daemon_ceph_cmd.append('--keyring')
             daemon_ceph_cmd.append(args.keyring)
         daemon_ceph_cmd.append('daemon')
-        daemon_ceph_cmd.append('%s/ceph-%s.asok' % (args.socket_dir, osd))
+        daemon_ceph_cmd.append('%s/%s-%s.asok' % (args.socket_dir, cluster, osd))
         daemon_ceph_cmd.append('perf')
         daemon_ceph_cmd.append('dump')
 
