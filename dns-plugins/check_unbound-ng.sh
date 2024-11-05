@@ -41,8 +41,8 @@ done
 
 # Main logic
 if [ ${#unbound_filter[@]} -ne 0 ]; then
-  cmd=$($unboundcontrol | grep -v thread | grep -v histogram | grep -v time. | sed 's/$/, /' | tr -d '\n' | tr ',' '\n' | grep $unbound_filter | tr '\n' ', ')
-  cmd_perf_data=$($unboundcontrol | grep -v thread | grep -v histogram | grep -v time. | sed 's/$/;;; /' | tr -d '\n' | tr ',' '\n' | grep $unbound_filter | tr -d '\n')
+  cmd=$($unboundcontrol | grep -v thread | grep -v histogram | grep -v time. | grep $unbound_filter | sed 's/$/, /' | tr -d '\n')
+  cmd_perf_data=$($unboundcontrol | grep -v thread | grep -v histogram | grep -v time. | grep $unbound_filter | sed 's/$/;;; /' | tr -d '\n')
   echo "$cmd | $cmd_perf_data"
 else
   cmd=$($unboundcontrol | grep -v thread | grep -v histogram | grep -v time. | sed 's/$/, /' | tr -d '\n')
