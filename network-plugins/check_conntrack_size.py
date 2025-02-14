@@ -1,0 +1,72 @@
+# https://exchange.icinga.com/barbarossatm/check_conntrack_size - https://raw.githubusercontent.com/BarbarossaTM/icinga2-plugins/refs/heads/main/check_conntrack_size/check_conntrack_size
+
+#!/usr/bin/python3
+#
+# Nagios plugin to check netfilter conntrack size
+#
+# Maximilian Wilhelm <max@rfc2324.org>
+#  --  Fri 11 Mar 2016 08:56:08 PM CET
+#
+
+import argparse
+import os.path
+import sys
+
+code = 0
+msg = ""
+
+parser = argparse.ArgumentParser (description = 'check netfilter conntrack table size')
+
+parser.add_argument ('--warn', '-w', help = "Warning conntrack table usage (percent)", default = "70", type = int)
+parser.add_argument ('--crit', '-c', help = "Critical conntrack table usage (percent)", default = "85", type = int)
+parser.add_argument ('--no-conntrack', help = "Return code when no conntrack is loaded.", default = "ok", choices = [ "ok", "warn", "crit", "unkn" ])
+
+args = parser.parse_args ()
+
+ret_map = {
+	'ok' : 0,
+	'warn' : 1,
+	'crit' : 2,
+	'unkn' : 3,
+}
+
+def read_int (path):
+	try:
+		with open (path, 'r') as fh:
+			return int (fh.read ())
+	except ValueError as v:
+		return -1
+	except IOError as i:
+		print ("conntrack seems not to be loaded.")
+		sys.exit (ret_map[args.no_conntrack])
+
+num_entries = read_int ("/proc/sys/net/netfilter/nf_conntrack_count")
+max_entries = read_int ("/proc/sys/net/netfilter/nf_conntrack_max")
+
+usage = num_entries / max_entries * 100
+
+# Calculate Performace Data Metrics
+warn_entries = int (max_entries / 100 * args.warn)
+crit_entries = int (max_entries / 100 * args.crit)
+
+perf_string = "'count'=%d;%d;%d" % (num_entries, warn_entries, crit_entries)
+
+
+if usage >= args.crit:
+	code = 2
+	msg = "Conntrack pool usage over %s%%: %d (%d / %d)" % (args.crit, usage, num_entries, max_entries)
+
+elif usage >= args.warn:
+	code = 1
+	msg = "Conntrack pool usage over %s%%: %d (%d/ %d)" % (args.warn, usage, num_entries, max_entries)
+
+elif usage < args.warn:
+	code = 0
+	msg = "Conntrack pool usage as at %d%% (%d / %d)" % (usage, num_entries, max_entries)
+
+else:
+	code = 3
+	msg = "WTF? Please examine the situation manually and kindly do the needful!"
+
+print ("%s | %s" % (msg, perf_string))
+sys.exit (code)
