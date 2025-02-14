@@ -1,5 +1,3 @@
-# https://exchange.icinga.com/barbarossatm/check_conntrack_size - https://raw.githubusercontent.com/BarbarossaTM/icinga2-plugins/refs/heads/main/check_conntrack_size/check_conntrack_size
-
 #!/usr/bin/python3
 #
 # Nagios plugin to check netfilter conntrack size
@@ -7,6 +5,7 @@
 # Maximilian Wilhelm <max@rfc2324.org>
 #  --  Fri 11 Mar 2016 08:56:08 PM CET
 #
+# https://exchange.icinga.com/barbarossatm/check_conntrack_size - https://raw.githubusercontent.com/BarbarossaTM/icinga2-plugins/refs/heads/main/check_conntrack_size/check_conntrack_size
 
 import argparse
 import os.path
