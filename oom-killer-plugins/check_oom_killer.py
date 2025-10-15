@@ -94,7 +94,7 @@ class OOMKillerMonitor:
 
             if (self.config.check.short):
                 for line in dmesg_logs_list:
-                    last_error = float(re.sub('[\[\]]', '', line.split()[0]))
+                    last_error = float(re.sub(r'[\[\]]', '', line.split()[0]))
                     with open('/proc/uptime', 'r') as f:
                         uptime_seconds = float(f.readline().split()[0])
                     if (uptime_seconds - last_error <= 86400):
