@@ -52,7 +52,7 @@ config['check']['short'] = args.short_check
 config['check']['verbose'] = args.verbose
 
 config['oom_killer']={}
-config['oom_killer']['check_command'] = "LC_ALL=C /bin/dmesg | /usr/bin/awk '/invoked oom-killer:/ || /Killed process/'"
+config['oom_killer']['check_command'] = "LC_ALL=C /bin/dmesg --ctime | /usr/bin/awk '/invoked oom-killer:/ || /Killed process/'"
 
 config['exclude'] = []
 if args.exclude:
@@ -61,12 +61,12 @@ if args.exclude:
 
 config = munchify(config)
 
-if len(config.exclude) > 0:
+oom_killer_exluded_logs_count = len(config.exclude)
+if oom_killer_exluded_logs_count > 0:
     config['oom_killer']['check_command'] += " | grep -Evw '"
     for exclude in config.exclude:
-       config['oom_killer']['check_command'] += exclude
-       if exclude != config.exclude[-1]:
-            config['oom_killer']['check_command'] += "|"
+        config['oom_killer']['check_command'] += exclude
+        config['oom_killer']['check_command'] += "|"
 
     config['oom_killer']['check_command'] += "'"
 
@@ -87,6 +87,7 @@ class OOMKillerMonitor:
         if self.check_dmesg() == "0":
             self.dmesg_logs = execute_cmd(cmd_query=self.config.oom_killer.check_command)
             dmesg_logs_list = str.split(self.dmesg_logs, '\n')
+            self.dmesg_logs_full_list = dmesg_logs_list
             counter = 0
 
             while '' in dmesg_logs_list:
@@ -136,21 +137,29 @@ class OOMKillerMonitor:
         elif self.oom_killer_logs_count <= self.config.level.warning and self.oom_killer_logs_count < self.config.level.critical:
             level = "ok"
             self.exit_code_stats = f"There aren't any OOM Killer logs"
+            if oom_killer_exluded_logs_count > 0:
+                self.exit_code_stats += f" | There are {oom_killer_exluded_logs_count} excluded OOM Killer logs"
+            if self.config.check.verbose:
+                self.exit_code_stats += f"\nLogs:\n{self.dmesg_logs_full_list}"
         elif self.oom_killer_logs_count > self.config.level.warning and self.oom_killer_logs_count < self.config.level.critical:
             level = "warning"
             self.exit_code_stats = f"There are {self.oom_killer_logs_count} OOM Killer logs"
+            if oom_killer_exluded_logs_count > 0:
+                self.exit_code_stats += f" | There are {oom_killer_exluded_logs_count} excluded OOM Killer logs"
             if self.config.check.verbose:
-                self.exit_code_stats += f"\nLogs:\n{self.dmesg_logs}"
+                self.exit_code_stats += f"\nLogs:\n{self.dmesg_logs_full_list}"
         elif self.oom_killer_logs_count > self.config.level.warning and self.oom_killer_logs_count >= self.config.level.critical:
             level = "critical"
             self.exit_code_stats = f"There are {self.oom_killer_logs_count} OOM Killer logs"
+            if oom_killer_exluded_logs_count > 0:
+                self.exit_code_stats += f" | There are {oom_killer_exluded_logs_count} excluded OOM Killer logs"
             if self.config.check.verbose:
-                self.exit_code_stats += f"\nLogs:\n{self.dmesg_logs}"
+                self.exit_code_stats += f"\nLogs:\n{self.dmesg_logs_full_list}"
         else:
             level = "unknown"
             self.exit_code_stats = f"Error! Check failed."
 
-        performance_data = f"oom_killer_logs={self.oom_killer_logs_count}"
+        performance_data = f"oom_killer_logs={self.oom_killer_logs_count}, oom_killer_excluded_logs={oom_killer_exluded_logs_count}"
         print(f"{self.get_exit_code(level).description} | {performance_data}")
         sys.exit(self.get_exit_code(level).code)
 
