@@ -155,7 +155,7 @@ def main() -> int:
     if mem_total:
         perf.append(f"memtotal_bytes={mem_total}B")
 
-    for k in ["pages_shared", "pages_sharing", "ksm_zero_pages", "pages_unshared", "pages_volatile", "pages_scanned", "pages_skipped", "full_scans"]:
+    for k in ["pages_shared", "pages_sharing", "ksm_zero_pages", "pages_unshared", "pages_volatile", "pages_scanned", "pages_skipped", "full_scans", "stable_node_chains"]:
         v = metrics.get(k)
         if v is not None:
             perf.append(f"{k}={v}")
