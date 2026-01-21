@@ -143,6 +143,7 @@ def main() -> int:
     add_if("general_profit", "general_profit~")
     add_if("max_page_sharing")
     add_if("merge_across_nodes")
+    add_if("stable_node_chains")
 
     message = f"{status_txt} - KSM {'ON' if is_on else 'OFF'}; " + " ".join(parts)
 
