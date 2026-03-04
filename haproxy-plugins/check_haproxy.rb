@@ -174,23 +174,21 @@ haproxy_response(options).each do |line|
     session_percent_usage = row['scur'].to_i * 100 / row['slim'].to_i
   end
 
+  scur = row['scur'] || '0'
+  slim = row['slim'] || '0'
+  smax = row['smax'] || '0'
+  pxname = (row['pxname'] || 'unknown').gsub('.', '_')
+  svname = (row['svname'] || 'unknown').gsub('.', '_')
+
   proxy_name = sprintf("%s %s (%s) %s", row['pxname'], row['svname'], role, row['status'])
-  
   message = sprintf("%s\tsess=%s/%s(%d%%) smax=%s",
                     proxy_name,
-                    row['scur'],
-                    row['slim'] || '-1',
+                    scur,
+                    slim,
                     session_percent_usage,
-                    row['smax']
-                   )
-  performance_data = performance_data + sprintf(" " + row['pxname'].gsub('.', '_') + "_" + 
-			                       row['svname'].gsub('.', '_') + "=" +
-                                               row['scur'] +
-			                       ";;" + 
-                                               row['slim'] + ";" +
-                                               "0" + ";" +
-                                               row['slim']
-                                               )
+                    smax)
+
+  performance_data += sprintf(" %s_%s=%s;;%s;0;%s", pxname, svname, scur, slim, slim)
 
   @proxies << message
 
