@@ -5,7 +5,7 @@ require 'open-uri'
 require 'ostruct'
 require 'csv'
 
-VERSION = :'3.2.0'
+VERSION = :'3.3.0'
 
 OK = 0
 WARNING = 1
@@ -19,6 +19,7 @@ status = ['OK', 'WARN', 'CRIT', 'UNKN']
 @errors = { OK => [], WARNING => [], CRITICAL => [], UNKNOWN => [] }
 options = OpenStruct.new
 options.proxies = nil
+options.exclude = nil
 
 op = OptionParser.new do |opts|
   opts.banner = 'Usage: check_haproxy.rb [options]'
@@ -35,6 +36,10 @@ op = OptionParser.new do |opts|
   # Optional Arguments
   opts.on("-p", "--proxies [PROXIES]", "Only check these proxies (eg. proxy1,proxy2,proxylive)") do |v|
     options.proxies = v.split(/,/)
+  end
+
+  opts.on("-x", "--exclude [PROXIES]", "Exclude these proxies (eg. proxy1,proxy2). Applied after --proxies.") do |v|
+    options.exclude = v.split(/,/)
   end
 
   opts.on("-U", "--user [USER]", "Basic auth user to login as") do |v|
@@ -150,8 +155,6 @@ end
 
 header = nil
 
-performance_data = '|'
-
 haproxy_response(options).each do |line|
   if line =~ /^# /
     header = line[2..-1].split(',')
@@ -164,6 +167,7 @@ haproxy_response(options).each do |line|
   row = header.zip(CSV.parse_line(line)).reduce({}) { |hash, val| hash.merge({val[0] => val[1]}) }
 
   next if options.proxies && !options.proxies.include?(row['pxname'])
+  next if options.exclude && options.exclude.include?(row['pxname'])
   next if ['statistics', 'admin_stats', 'stats'].include? row['pxname']
   next if row['status'] == 'no check'
 
@@ -174,22 +178,13 @@ haproxy_response(options).each do |line|
     session_percent_usage = row['scur'].to_i * 100 / row['slim'].to_i
   end
 
-  scur = row['scur'] || '0'
-  slim = row['slim'] || '0'
-  smax = row['smax'] || '0'
-  pxname = (row['pxname'] || 'unknown').gsub('.', '_')
-  svname = (row['svname'] || 'unknown').gsub('.', '_')
-
   proxy_name = sprintf("%s %s (%s) %s", row['pxname'], row['svname'], role, row['status'])
   message = sprintf("%s\tsess=%s/%s(%d%%) smax=%s",
                     proxy_name,
-                    scur,
-                    slim,
+                    row['scur'],
+                    row['slim'] || '-1',
                     session_percent_usage,
-                    smax)
-
-  performance_data += sprintf(" %s_%s=%s;;%s;0;%s", pxname, svname, scur, slim, slim)
-
+                    row['smax'])
   @proxies << message
 
   if role == :act && row['status'] == 'DOWN'
@@ -203,8 +198,6 @@ haproxy_response(options).each do |line|
     @errors[WARNING] << sprintf("%s - too many sessions %s/%s(%d%%)", proxy_name, row['scur'], row['slim'], session_percent_usage)
   end
 end
-
-@proxies << performance_data + " proxies=#{@proxies.length}"
 
 @errors[OK] << "#{@proxies.length} proxies found"
 
