@@ -66,6 +66,7 @@ Exit codes: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN.
 """
 
 import argparse
+import errno
 import glob
 import json
 import os
@@ -74,14 +75,14 @@ import statistics
 import sys
 import time
 
-__version__ = "2.0"
+__version__ = "2.1"
 
 OK, WARNING, CRITICAL, UNKNOWN = 0, 1, 2, 3
 STATUS = {OK: "OK", WARNING: "WARNING", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
 
 HZ = os.sysconf("SC_CLK_TCK")
 PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
-DEFAULT_STATE = "/var/tmp/check_numa_health.state"
+DEFAULT_STATE = f"/var/tmp/check_numa_health.{os.geteuid()}.state"
 
 VMSTAT_KEYS = (
     "pgscan_kswapd",
@@ -256,7 +257,33 @@ def save_state(path, data):
             json.dump(data, handle)
         os.replace(tmp, path)
     except OSError as exc:
-        print(f"NUMA UNKNOWN - cannot write state file {path}: {exc}")
+        detail = f"NUMA UNKNOWN - cannot write state file {path}: {exc}"
+        try:
+            import pwd
+
+            me = pwd.getpwuid(os.geteuid()).pw_name
+        except (ImportError, KeyError):
+            me = str(os.geteuid())
+        if exc.errno == errno.EPERM and os.path.exists(path):
+            try:
+                owner = pwd.getpwuid(os.stat(path).st_uid).pw_name
+            except (KeyError, OSError, NameError):
+                owner = "another user"
+            detail += (
+                f" - the existing file belongs to {owner} but the check is "
+                f"running as {me}, and the sticky bit on the parent directory "
+                f"forbids replacing it. Remove the stale file, or point "
+                f"--state at a directory owned by {me}"
+            )
+        elif exc.errno in (errno.EACCES, errno.EROFS):
+            detail += (
+                f" - {me} cannot write there; point --state at a writable "
+                f"directory such as /var/lib/icinga2/numa/"
+            )
+        try:
+            print(detail)
+        except BrokenPipeError:
+            pass
         sys.exit(UNKNOWN)
 
 
@@ -321,8 +348,9 @@ def parse_args():
     )
     parser.add_argument(
         "--boost-ratio-warn", type=float, default=2.0,
-        help="WARNING when a node's min watermark exceeds the median across "
-             "nodes by this factor, indicating active watermark boosting",
+        help="On kernels that do not report watermark_boost in "
+             "/proc/zoneinfo, infer boosting when a node's min watermark "
+             "exceeds the median across nodes by this factor",
     )
     parser.add_argument(
         "--imbalance-host-free", type=float, default=15.0,
@@ -459,49 +487,48 @@ def main():
     perfdata.append(f"rate_checks={1 if deltas_usable else 0}")
 
     # --- 2. Watermark boost detection ------------------------------------
+    # Boost is raised on every external fragmentation event and decays again
+    # as kswapd runs, so finding it applied at an arbitrary sampling moment
+    # is normal on a busy hypervisor. It is collected here and judged later,
+    # once kswapd activity is known, because boost only matters when it is
+    # actually driving reclaim or can no longer decay.
     boost_factor = read_sysctl("vm.watermark_boost_factor")
     if boost_factor is not None:
         perfdata.append(f"watermark_boost_factor={boost_factor}")
 
+    boosted = []
     mins = [
         watermarks[n]["min"] for n in meminfo
         if n in watermarks and watermarks[n]["min"] > 0
     ]
-    if len(mins) >= 3:
-        median_min = statistics.median(mins)
-        for node_id in sorted(meminfo, key=int):
-            wm = watermarks.get(node_id)
-            if not wm or wm["min"] <= 0 or median_min <= 0:
-                continue
-            explicit = wm["boost"] if kernel_reports_boost else 0
+    median_min = statistics.median(mins) if len(mins) >= 3 else 0
+
+    for node_id in sorted(meminfo, key=int):
+        wm = watermarks.get(node_id)
+        if not wm or wm["min"] <= 0:
+            continue
+        if kernel_reports_boost:
+            # The kernel tells us directly; no need to infer anything.
+            boost_pages = wm["boost"]
+            ratio = wm["min"] / median_min if median_min > 0 else 1.0
+        elif median_min > 0 and wm["min"] / median_min > args.boost_ratio_warn:
+            # Older kernels omit the boost line, so infer it from how far
+            # this node's min sits above the median across nodes.
+            boost_pages = int(wm["min"] - median_min)
             ratio = wm["min"] / median_min
-            if explicit > 0 or ratio > args.boost_ratio_warn:
-                inflated_mb = int((wm["min"] - median_min) * PAGE_KB // 1024)
-                escalate(WARNING)
-                if boost_factor == 0:
-                    # Boost only decays inside balance_pgdat, which runs only
-                    # while free is under the low watermark. An inflated
-                    # watermark keeps free above low, so kswapd never runs and
-                    # the boost never clears - it is stuck until the
-                    # watermarks are recalculated.
-                    problems.append(
-                        f"node{node_id} watermarks still inflated by roughly "
-                        f"{inflated_mb} MB (min is {ratio:.1f}x the median) "
-                        f"even though watermark_boost_factor is 0 - stuck "
-                        f"boost, clear it with: sysctl -w vm.min_free_kbytes="
-                        f"$(sysctl -n vm.min_free_kbytes)"
-                    )
-                else:
-                    problems.append(
-                        f"node{node_id} watermarks inflated by roughly "
-                        f"{inflated_mb} MB (min is {ratio:.1f}x the median) - "
-                        f"watermark boosting is active (factor "
-                        f"{boost_factor}), which can leave kswapd chasing an "
-                        f"unreachable target"
-                    )
+        else:
+            continue
+        if boost_pages <= 0:
+            continue
+        boost_mb = boost_pages * PAGE_KB // 1024
+        perfdata.append(f"node{node_id}_boost_mb={boost_mb}MB")
+        boosted.append((node_id, boost_mb, ratio))
+
+    perfdata.append(f"boosted_nodes={len(boosted)}")
 
     # --- 3. kswapd CPU ----------------------------------------------------
     hottest_kswapd = 0.0
+    kswapd_pct = {}
     if deltas_usable:
         for node_id in sorted(kswapd_now, key=int):
             ticks = kswapd_now[node_id]
@@ -509,6 +536,7 @@ def main():
             if prior is None or ticks < prior:
                 continue
             pct = 100.0 * (ticks - prior) / HZ / age
+            kswapd_pct[node_id] = pct
             hottest_kswapd = max(hottest_kswapd, pct)
             perfdata.append(
                 f"kswapd{node_id}_cpu={pct:.1f}%;"
@@ -520,6 +548,41 @@ def main():
             elif pct > args.kswapd_warn:
                 escalate(WARNING)
                 problems.append(f"kswapd{node_id} at {pct:.0f}% CPU")
+
+    # --- 3b. Is any of that boost actually harmful? ------------------------
+    # Three ways boost hurts, and nothing else warrants an alert:
+    #   1. The factor is 0, so boost can only decay inside balance_pgdat -
+    #      but an inflated watermark keeps free above low, kswapd never runs,
+    #      and the boost is stuck until the watermarks are recalculated.
+    #   2. Free has fallen under the boosted low watermark, so the inflated
+    #      target is what is driving reclaim right now.
+    #   3. kswapd on that node is burning CPU while boost is applied.
+    for node_id, boost_mb, ratio in boosted:
+        wm = watermarks.get(node_id, {})
+        below_low = wm.get("free", 0) < wm.get("low", 0)
+        busy = kswapd_pct.get(node_id, 0.0) > args.kswapd_warn
+
+        if boost_factor == 0:
+            escalate(WARNING)
+            problems.append(
+                f"node{node_id} watermarks still inflated by roughly "
+                f"{boost_mb} MB even though watermark_boost_factor is 0 - "
+                f"stuck boost, clear it with: sysctl -w vm.min_free_kbytes="
+                f"$(sysctl -n vm.min_free_kbytes)"
+            )
+        elif below_low or busy:
+            escalate(WARNING)
+            reason = (
+                "free is under the boosted low watermark"
+                if below_low else
+                f"kswapd{node_id} is at {kswapd_pct.get(node_id, 0):.0f}% CPU"
+            )
+            problems.append(
+                f"node{node_id} watermarks inflated by roughly {boost_mb} MB "
+                f"(min is {ratio:.1f}x the median) and {reason} - boosting "
+                f"(factor {boost_factor}) may be driving reclaim toward an "
+                f"unreachable target"
+            )
 
     # --- 4. Reclaim efficiency and compaction -----------------------------
     if deltas_usable:
@@ -628,6 +691,12 @@ def main():
                     f"watermark headroom"
                 )
         detail += f"; host {host_free_pct:.0f}% free"
+        if boosted:
+            largest = max(boosted, key=lambda item: item[1])
+            detail += (
+                f"; watermark boost applied on {len(boosted)} node(s), "
+                f"up to {largest[1]} MB on node{largest[0]}, decaying normally"
+            )
         notes.insert(0, detail)
 
     summary = "; ".join(problems + notes) if problems else "; ".join(notes)
@@ -649,4 +718,3 @@ if __name__ == "__main__":
         except BrokenPipeError:
             pass
         sys.exit(UNKNOWN)
-
