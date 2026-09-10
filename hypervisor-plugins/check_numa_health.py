@@ -75,7 +75,7 @@ import statistics
 import sys
 import time
 
-__version__ = "2.4"
+__version__ = "2.5"
 
 OK, WARNING, CRITICAL, UNKNOWN = 0, 1, 2, 3
 STATUS = {OK: "OK", WARNING: "WARNING", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
@@ -223,11 +223,17 @@ def read_psi_memory():
                 pairs = dict(
                     item.split("=", 1) for item in fields[1:] if "=" in item
                 )
-                result[fields[0]] = {
+                entry = {
                     window: float(pairs[window])
                     for window in ("avg10", "avg60", "avg300")
                     if window in pairs
                 }
+                if "total" in pairs:
+                    # Microseconds accumulated since boot. Unlike the avg
+                    # windows this never decays, so a delta between two runs
+                    # covers the whole interval exactly.
+                    entry["total"] = float(pairs["total"])
+                result[fields[0]] = entry
     except (OSError, ValueError):
         return {}
     return result
@@ -420,6 +426,14 @@ def main():
     watermarks, kernel_reports_boost = read_zone_watermarks()
     kswapd_now = read_kswapd_cpu()
     vmstat_now = read_vmstat()
+    psi = read_psi_memory()
+    if not isinstance(psi, dict):
+        psi = {}
+    psi_totals = {
+        kind: values["total"]
+        for kind, values in psi.items()
+        if isinstance(values, dict) and "total" in values
+    }
     now = time.time()
 
     previous = load_state(args.state)
@@ -427,6 +441,7 @@ def main():
         "ts": now,
         "kswapd": kswapd_now,
         "vmstat": vmstat_now,
+        "psi_totals": psi_totals,
     })
 
     age = now - previous["ts"] if previous else None
@@ -735,27 +750,49 @@ def main():
                     )
 
     # --- 5. Pressure stall information ------------------------------------
-    psi = read_psi_memory()
-    if isinstance(psi, dict) and psi:
+    if psi:
         warn_field = args.psi_full_warn if args.psi_full_warn > 0 else ""
         for kind in ("full", "some"):
             for window, value in sorted(psi.get(kind, {}).items()):
-                thresholds = (
-                    f"{warn_field};;0;100"
-                    if kind == "full" and window == args.psi_window
-                    else ";;0;100"
-                )
-                perfdata.append(
-                    f"psi_mem_{kind}_{window}={value:.2f}%;{thresholds}"
-                )
-        watched = psi.get("full", {}).get(args.psi_window)
-        if args.psi_full_warn > 0 and watched is not None:
-            if watched > args.psi_full_warn:
-                escalate(WARNING)
-                problems.append(
-                    f"memory PSI full {args.psi_window} at {watched:.1f}% - "
-                    f"tasks are stalling on memory"
-                )
+                if window == "total":
+                    perfdata.append(
+                        f"psi_mem_{kind}_total={value / 1e6:.0f}s"
+                    )
+                else:
+                    perfdata.append(
+                        f"psi_mem_{kind}_{window}={value:.2f}%;;;0;100"
+                    )
+
+        # Preferred measure: how much of the interval just elapsed was spent
+        # stalled, derived from the non-decaying total counter. The avg
+        # windows are exponentially decayed, so an hour after an episode they
+        # read zero no matter how bad it was.
+        interval_pct = None
+        prior_total = previous.get("psi_totals", {}).get("full") if previous else None
+        current_total = psi.get("full", {}).get("total")
+        if deltas_usable and prior_total is not None and current_total is not None:
+            delta_us = max(0.0, current_total - prior_total)
+            interval_pct = 100.0 * (delta_us / 1e6) / age
+            perfdata.append(
+                f"psi_mem_full_interval={interval_pct:.2f}%;{warn_field};;0;100"
+            )
+
+        if args.psi_full_warn > 0:
+            if interval_pct is not None:
+                if interval_pct > args.psi_full_warn:
+                    escalate(WARNING)
+                    problems.append(
+                        f"memory PSI full at {interval_pct:.1f}% over the last "
+                        f"{age:.0f}s - tasks were stalled waiting on memory"
+                    )
+            else:
+                watched = psi.get("full", {}).get(args.psi_window)
+                if watched is not None and watched > args.psi_full_warn:
+                    escalate(WARNING)
+                    problems.append(
+                        f"memory PSI full {args.psi_window} at {watched:.1f}% - "
+                        f"tasks are stalling on memory"
+                    )
 
     # --- 6. NUMA imbalance -------------------------------------------------
     if (
