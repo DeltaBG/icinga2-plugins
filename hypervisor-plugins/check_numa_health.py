@@ -75,7 +75,7 @@ import statistics
 import sys
 import time
 
-__version__ = "2.2"
+__version__ = "2.4"
 
 OK, WARNING, CRITICAL, UNKNOWN = 0, 1, 2, 3
 STATUS = {OK: "OK", WARNING: "WARNING", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
@@ -206,21 +206,31 @@ def read_vmstat():
 
 
 def read_psi_memory():
-    """Return (some_avg10, full_avg10) as percentages, or (None, None)."""
-    some = full = None
+    """Return {'some': {window: pct}, 'full': {window: pct}} or {}.
+
+    All three averaging windows are collected. avg10 is far too narrow for a
+    five-minute check interval: it samples ten seconds out of three hundred,
+    so an episode that ended a minute ago is already invisible. avg300
+    covers the whole interval without a blind spot.
+    """
+    result = {}
     try:
         with open("/proc/pressure/memory") as handle:
             for line in handle:
+                fields = line.split()
+                if not fields or fields[0] not in ("some", "full"):
+                    continue
                 pairs = dict(
-                    item.split("=", 1) for item in line.split()[1:] if "=" in item
+                    item.split("=", 1) for item in fields[1:] if "=" in item
                 )
-                if line.startswith("some"):
-                    some = float(pairs.get("avg10", 0))
-                elif line.startswith("full"):
-                    full = float(pairs.get("avg10", 0))
+                result[fields[0]] = {
+                    window: float(pairs[window])
+                    for window in ("avg10", "avg60", "avg300")
+                    if window in pairs
+                }
     except (OSError, ValueError):
-        pass
-    return some, full
+        return {}
+    return result
 
 
 def read_sysctl(name):
@@ -341,6 +351,24 @@ def parse_args():
         help="Minimum compaction stalls/sec before the failure ratio is "
              "judged. A high failure ratio at a low event rate is normal "
              "background fragmentation, not a problem worth paging for",
+    )
+    parser.add_argument(
+        "--psi-window", choices=("avg10", "avg60", "avg300"), default="avg300",
+        help="Which PSI averaging window the threshold applies to. avg300 is "
+             "the default because it covers a five-minute check interval "
+             "without a blind spot; avg10 misses episodes that have just "
+             "ended",
+    )
+    parser.add_argument(
+        "--kswapd-lifetime-warn", type=float, default=5.0,
+        help="WARNING when a kswapd thread has consumed this percent of the "
+             "host's total uptime. Works without a state file, so it catches "
+             "a long-running spin on the very first run (0 disables)",
+    )
+    parser.add_argument(
+        "--kswapd-lifetime-floor", type=float, default=1800.0,
+        help="Minimum cumulative CPU seconds before the lifetime share is "
+             "judged, so a large percentage over a short uptime is ignored",
     )
     parser.add_argument(
         "--psi-full-warn", type=float, default=1.0,
@@ -549,6 +577,42 @@ def main():
     # --- 3. kswapd CPU ----------------------------------------------------
     hottest_kswapd = 0.0
     kswapd_pct = {}
+
+    # Cumulative CPU time needs no previous sample, so this is the one kswapd
+    # signal that still works on a first run. A thread that has averaged
+    # several percent of a node's entire uptime has been spinning for hours.
+    uptime = 0.0
+    try:
+        with open("/proc/uptime") as handle:
+            uptime = float(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        pass
+    for node_id in sorted(kswapd_now, key=int):
+        seconds = kswapd_now[node_id] / HZ
+        perfdata.append(f"kswapd{node_id}_cpu_total={seconds:.0f}s")
+        if uptime > 0:
+            share = 100.0 * seconds / uptime
+            perfdata.append(f"kswapd{node_id}_cpu_lifetime={share:.2f}%")
+            # Two guards. A share above 100% is impossible for one thread and
+            # means the uptime reading is unusable, and a percentage computed
+            # over a few seconds of uptime says nothing - require real CPU
+            # time on the clock before calling it sustained pressure.
+            if (
+                args.kswapd_lifetime_warn > 0
+                and share > args.kswapd_lifetime_warn
+                and share <= 100.0
+                and seconds >= args.kswapd_lifetime_floor
+            ):
+                if seconds >= 3600:
+                    spent = f"{seconds / 3600:.1f} CPU hours"
+                else:
+                    spent = f"{seconds / 60:.0f} CPU minutes"
+                escalate(WARNING)
+                problems.append(
+                    f"kswapd{node_id} has used {spent}, {share:.1f}% of this "
+                    f"host's uptime - sustained reclaim pressure on that node"
+                )
+
     if deltas_usable:
         for node_id in sorted(kswapd_now, key=int):
             ticks = kswapd_now[node_id]
@@ -556,6 +620,11 @@ def main():
             if prior is None or ticks < prior:
                 continue
             pct = 100.0 * (ticks - prior) / HZ / age
+            # A single kernel thread cannot exceed one CPU. Anything above
+            # that means the baseline is unusable - clock skew, or a state
+            # file carried across a reboot where the counter did not visibly
+            # go backwards. Clamp rather than report a nonsense figure.
+            pct = min(pct, 100.0)
             kswapd_pct[node_id] = pct
             hottest_kswapd = max(hottest_kswapd, pct)
             perfdata.append(
@@ -666,14 +735,27 @@ def main():
                     )
 
     # --- 5. Pressure stall information ------------------------------------
-    psi_some, psi_full = read_psi_memory()
-    if psi_full is not None:
+    psi = read_psi_memory()
+    if isinstance(psi, dict) and psi:
         warn_field = args.psi_full_warn if args.psi_full_warn > 0 else ""
-        perfdata.append(f"psi_mem_full={psi_full:.2f}%;{warn_field};;0;100")
-        perfdata.append(f"psi_mem_some={psi_some:.2f}%;;;0;100")
-        if args.psi_full_warn > 0 and psi_full > args.psi_full_warn:
-            escalate(WARNING)
-            problems.append(f"memory PSI full avg10 at {psi_full:.1f}%")
+        for kind in ("full", "some"):
+            for window, value in sorted(psi.get(kind, {}).items()):
+                thresholds = (
+                    f"{warn_field};;0;100"
+                    if kind == "full" and window == args.psi_window
+                    else ";;0;100"
+                )
+                perfdata.append(
+                    f"psi_mem_{kind}_{window}={value:.2f}%;{thresholds}"
+                )
+        watched = psi.get("full", {}).get(args.psi_window)
+        if args.psi_full_warn > 0 and watched is not None:
+            if watched > args.psi_full_warn:
+                escalate(WARNING)
+                problems.append(
+                    f"memory PSI full {args.psi_window} at {watched:.1f}% - "
+                    f"tasks are stalling on memory"
+                )
 
     # --- 6. NUMA imbalance -------------------------------------------------
     if (
@@ -724,6 +806,10 @@ def main():
                     f"watermark headroom"
                 )
         detail += f"; host {host_free_pct:.0f}% free"
+        if not deltas_usable:
+            # Silently reporting OK while half the checks were skipped is
+            # worse than a little clutter.
+            detail += "; rate checks pending"
         if boosted:
             largest = max(boosted, key=lambda item: item[1])
             detail += (
