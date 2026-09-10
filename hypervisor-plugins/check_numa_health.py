@@ -75,7 +75,7 @@ import statistics
 import sys
 import time
 
-__version__ = "2.1"
+__version__ = "2.2"
 
 OK, WARNING, CRITICAL, UNKNOWN = 0, 1, 2, 3
 STATUS = {OK: "OK", WARNING: "WARNING", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
@@ -353,6 +353,13 @@ def parse_args():
              "exceeds the median across nodes by this factor",
     )
     parser.add_argument(
+        "--low-margin", type=float, default=2.0,
+        help="A node counts as below the low watermark only when free is "
+             "this percent of the min-to-high band underneath it. Free "
+             "hovering exactly on low is the normal steady state for a "
+             "fallback node and would otherwise flap every cycle",
+    )
+    parser.add_argument(
         "--imbalance-host-free", type=float, default=15.0,
         help="Imbalance is flagged only when the host has at least this "
              "percent free overall (0 disables the imbalance check)",
@@ -416,6 +423,7 @@ def main():
     lowest_node = None
     lowest_headroom = None
     nodes_below_low = []
+    nodes_below_min = []
 
     for node_id in sorted(meminfo, key=int):
         values = meminfo[node_id]
@@ -445,21 +453,33 @@ def main():
             if lowest_headroom is None or headroom < lowest_headroom:
                 lowest_node, lowest_headroom = node_id, headroom
 
-            if free_pages < wm["low"]:
+            margin_pages = span * args.low_margin / 100.0 if span > 0 else 0
+            if free_pages < wm["low"] - margin_pages:
                 nodes_below_low.append(node_id)
+            if free_pages < wm["min"]:
+                nodes_below_min.append(node_id)
 
             breached = None
             for name in ("min", "low", "high"):
-                if free_pages < wm[name]:
+                threshold = wm[name]
+                if name == "low":
+                    threshold -= margin_pages
+                if free_pages < threshold:
                     breached = name
                     break
 
             if breached:
-                free_mb = free_pages * PAGE_KB // 1024
-                target_mb = wm[breached] * PAGE_KB // 1024
+                short_kb = int((wm[breached] - free_pages) * PAGE_KB)
+                # Two rounded megabyte figures a few pages apart read like a
+                # bug, so state the shortfall rather than both endpoints.
+                if short_kb < 1024:
+                    shortfall = f"{short_kb} kB"
+                else:
+                    shortfall = f"{short_kb / 1024:.1f} MB"
                 message = (
-                    f"node{node_id} free {free_mb} MB is below the "
-                    f"{breached} watermark ({target_mb} MB)"
+                    f"node{node_id} free is {shortfall} under its "
+                    f"{breached} watermark "
+                    f"({wm[breached] * PAGE_KB // 1024} MB)"
                 )
                 if wm_crit and threshold_order[breached] <= threshold_order[wm_crit]:
                     escalate(CRITICAL)
@@ -661,11 +681,24 @@ def main():
         and nodes_below_low
         and host_free_pct >= args.imbalance_host_free
     ):
-        escalate(CRITICAL)
+        # Sitting on the low watermark is where kswapd is meant to hold a
+        # busy node, so imbalance alone is a warning. It becomes critical
+        # only once a node drops under min, where allocations start
+        # stalling in direct reclaim.
+        if nodes_below_min:
+            escalate(CRITICAL)
+            severity_note = (
+                f"node(s) {', '.join(nodes_below_min)} under min, "
+                f"allocations are entering direct reclaim"
+            )
+        else:
+            escalate(WARNING)
+            severity_note = "no node under min yet, so no allocation stalls"
         problems.append(
             f"NUMA imbalance: node(s) {', '.join(nodes_below_low)} below the "
-            f"low watermark while the host has {host_free_pct:.0f}% free - "
-            f"check strict NUMA pinning and memory-less node fallback"
+            f"low watermark while the host has {host_free_pct:.0f}% free "
+            f"({severity_note}) - check strict NUMA pinning and memory-less "
+            f"node fallback"
         )
 
     # --- Output ------------------------------------------------------------
