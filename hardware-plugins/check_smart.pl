@@ -61,7 +61,7 @@ use Getopt::Long;
 use File::Basename qw(basename);
 
 my $basename = basename($0);
-my $revision = '6.12.2-deltabg1';
+my $revision = '6.12.2-delta2';
 
 # Standard Nagios return codes
 my %ERRORS=('OK'=>0,'WARNING'=>1,'CRITICAL'=>2,'UNKNOWN'=>3,'DEPENDENT'=>4);
@@ -459,13 +459,22 @@ foreach $device ( split("\\|",$device) ){
 		# separate metric-gathering and output analysis for ATA vs SCSI SMART output
 		# Yeah - but megaraid is the same output as ata
 		if ($output_mode =~ "ata") {
+			# Tolerant pre-pass: collect EVERY attribute that is in a failed state,
+			# matching only on the WHEN_FAILED column and ignoring the raw value format.
+			# The main loop below skips lines whose raw value is not numeric, which would
+			# otherwise hide a real failure from the --health-exclude decision.
+			foreach my $line(@output){
+				next unless $line =~ /^\s*(\d+)\s+(\S+)\s+0x\S+\s+(?:\S+\s+){5}(\S+)/;
+				next if $3 eq '-';
+				push(@failed_attributes, { num => $1, name => $2, when => $3 });
+				warn "(debug) attribute $2 ($1) is in failed state: $3\n" if $opt_debug;
+			}
 			foreach my $line(@output){
 				# get lines that look like this:
 				#    9 Power_On_Minutes        0x0032   241   241   000    Old_age   Always       -       113h+12m
 				next unless $line =~ /^\s*(\d+)\s(\S+)\s+(?:\S+\s+){6}(\S+)\s+(\d+)/;
 				my ($attribute_number, $attribute_name, $when_failed, $raw_value) = ($1, $2, $3, $4);
 				if ($when_failed ne '-'){
-					push(@failed_attributes, { num => $attribute_number, name => $attribute_name, when => $when_failed });
 					# Going through exclude list
 					if (grep {$_ eq $attribute_number || $_ eq $attribute_name || $_ eq $when_failed} @exclude_checks) {
 					  warn "SMART Attribute $attribute_name failed at $when_failed but was set to be ignored\n" if $opt_debug;
@@ -712,7 +721,8 @@ foreach $device ( split("\\|",$device) ){
 				warn "(debug) health status $health_status_failed caused only by excluded attribute(s) $ignored, not escalating\n\n" if $opt_debug;
 				push(@notice_messages, "Health status: $health_status_failed (ignored, only excluded attribute(s) failing: $ignored)");
 			} else {
-				push(@error_messages, "Health status: $health_status_failed");
+				my $why = join(',', map { "$_->{name}=$_->{when}" } @not_excluded);
+				push(@error_messages, "Health status: $health_status_failed" . ($why ? " (failing: $why)" : ""));
 				escalate_status('CRITICAL');
 			}
 		}
