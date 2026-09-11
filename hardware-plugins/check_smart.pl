@@ -53,13 +53,15 @@
 # Dec 10, 2021: Claudio Kuenzler - Sec fix in path for pseudo-devices, add Erase_Fail_Count_Total, fix NVMe perfdata (6.12.0)
 # Dec 10, 2021: Claudio Kuenzler - Bugfix in interface handling (6.12.1)
 # Dec 16, 2021: Lorenz Kaestle - Bugfix when interface parameter was missing in combination with -g (6.12.2)
+# Sep 11, 2026: --health-exclude - do not escalate a FAILED self-assessment when every failing
+#               attribute is on the -e/-E exclude list (6.12.2-delta1)
 
 use strict;
 use Getopt::Long;
 use File::Basename qw(basename);
 
 my $basename = basename($0);
-my $revision = '6.12.2';
+my $revision = '6.12.2-deltabg1';
 
 # Standard Nagios return codes
 my %ERRORS=('OK'=>0,'WARNING'=>1,'CRITICAL'=>2,'UNKNOWN'=>3,'DEPENDENT'=>4);
@@ -69,7 +71,7 @@ $ENV{'PATH'}='/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin';
 $ENV{'BASH_ENV'}='';
 $ENV{'ENV'}='';
 
-use vars qw($opt_b $opt_d $opt_g $opt_debug $opt_h $opt_i $opt_e $opt_E $opt_r $opt_s $opt_v $opt_w $opt_q $opt_l $opt_skip_sa);
+use vars qw($opt_b $opt_d $opt_g $opt_debug $opt_h $opt_i $opt_e $opt_E $opt_r $opt_s $opt_v $opt_w $opt_q $opt_l $opt_skip_sa $opt_health_exclude);
 Getopt::Long::Configure('bundling');
 GetOptions(
                           "debug"         => \$opt_debug,
@@ -87,6 +89,7 @@ GetOptions(
         "w=s" => \$opt_w, "warn=s"        => \$opt_w,
         "l"   => \$opt_l, "ssd-lifetime"  => \$opt_l,
 			  "skip-self-assessment" => \$opt_skip_sa,
+			  "health-exclude"       => \$opt_health_exclude,
 );
 
 if ($opt_v) {
@@ -233,6 +236,8 @@ my $drive_details;
 foreach $device ( split("\\|",$device) ){
 	foreach $interface ( split("\\|",$interface) ){
 		my @error_messages = qw//;
+		my $health_status_failed = '';
+		my @failed_attributes = ();
 		my @warning_messages = qw//;
 		my @notice_messages = qw//;
 		my($status_string_local)='';
@@ -292,8 +297,7 @@ foreach $device ( split("\\|",$device) ){
 				else {
 					warn "(debug) no '$ok_str_scsi' status; failing\n" if $opt_debug;
 					warn "(debug) no '$ok_str_scsi' status; failing but ignoring" if $opt_debug && $opt_skip_sa;
-					push(@error_messages, "Health status: $1") unless $opt_skip_sa;
-					escalate_status('CRITICAL') unless $opt_skip_sa;
+					$health_status_failed = $1 unless $opt_skip_sa;
 				}
 			}
 			elsif($line =~ /$line_str_ata(.+)/){
@@ -311,8 +315,7 @@ foreach $device ( split("\\|",$device) ){
 				else {
 					warn "(debug) no '$ok_str_ata' status; failing\n" if $opt_debug;
 					warn "(debug) no '$ok_str_ata' status; failing but ignoring\n" if $opt_debug && $opt_skip_sa;
-					push(@error_messages, "Health status: $1") unless $opt_skip_sa;
-					escalate_status('CRITICAL') unless $opt_skip_sa;
+					$health_status_failed = $1 unless $opt_skip_sa;
 				}
 			}
 			if($line =~ /$line_model_ata(.+)/){
@@ -462,6 +465,7 @@ foreach $device ( split("\\|",$device) ){
 				next unless $line =~ /^\s*(\d+)\s(\S+)\s+(?:\S+\s+){6}(\S+)\s+(\d+)/;
 				my ($attribute_number, $attribute_name, $when_failed, $raw_value) = ($1, $2, $3, $4);
 				if ($when_failed ne '-'){
+					push(@failed_attributes, { num => $attribute_number, name => $attribute_name, when => $when_failed });
 					# Going through exclude list
 					if (grep {$_ eq $attribute_number || $_ eq $attribute_name || $_ eq $when_failed} @exclude_checks) {
 					  warn "SMART Attribute $attribute_name failed at $when_failed but was set to be ignored\n" if $opt_debug;
@@ -694,6 +698,25 @@ foreach $device ( split("\\|",$device) ){
 				}
 			}
 		}
+		# Deferred evaluation of the overall SMART health self-assessment.
+		# With --health-exclude a FAILED self-assessment is not escalated as long as
+		# every attribute currently in a failed state is covered by the -e/-E list.
+		if ($health_status_failed) {
+			my @not_excluded = grep {
+				my $a = $_;
+				!grep { $_ eq $a->{num} || $_ eq $a->{name} || $_ eq $a->{when} } @exclude_checks;
+			} @failed_attributes;
+
+			if ($opt_health_exclude && scalar(@failed_attributes) > 0 && scalar(@not_excluded) == 0) {
+				my $ignored = join(',', map { $_->{name} } @failed_attributes);
+				warn "(debug) health status $health_status_failed caused only by excluded attribute(s) $ignored, not escalating\n\n" if $opt_debug;
+				push(@notice_messages, "Health status: $health_status_failed (ignored, only excluded attribute(s) failing: $ignored)");
+			} else {
+				push(@error_messages, "Health status: $health_status_failed");
+				escalate_status('CRITICAL');
+			}
+		}
+
 		warn "(debug) gathered perfdata:\n@perfdata\n\n" if $opt_debug;
 		$perf_string = join(' ', @perfdata);
 		
@@ -810,6 +833,8 @@ sub print_help {
         print "  -s/--selftest: Enable self-test log check\n";
         print "  -l/--ssd-lifetime: Check attribute 'Percent_Lifetime_Remain' available on some SSD drives\n";
         print "  --skip-self-assessment: Skip SMART self-assessment health status check\n";
+        print "  --health-exclude: Do not alert on a FAILED SMART self-assessment if every failing\n";
+        print "       attribute is listed in -e/--exclude or -E/--exclude-all (e.g. -e Wear_Leveling_Count --health-exclude)\n";
         print "  -h/--help: this help\n";
         print "  -q/--quiet: When faults detected, only show faulted drive(s) (only affects output when used with -g parameter)\n";
         print "  --debug: show debugging information\n";
