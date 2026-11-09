@@ -94,7 +94,20 @@ def emin(a, b):
     return min(vals) if vals else None
 
 
+def slot_map():
+    # /sys/bus/pci/slots/<name>/address is "dddd:bb:dd" (no function)
+    res = {}
+    base = "/sys/bus/pci/slots"
+    if os.path.isdir(base):
+        for s in os.listdir(base):
+            a = read(os.path.join(base, s, "address"))
+            if a:
+                res[a] = s
+    return res
+
+
 def collect():
+    slots = slot_map()
     drives = []
     for name in sorted(os.listdir(NVME_CLASS),
                        key=lambda n: int(n[4:]) if n[4:].isdigit() else 0):
@@ -117,6 +130,7 @@ def collect():
             "name": name,
             "addr": addr,
             "model": " ".join((read(os.path.join(base, "model")) or "?").split()),
+            "slot": slots.get(addr.rsplit(".", 1)[0]),
             "dev": dev,
             "port": port,
             "exp_w": emin(dev["max_w"], port.get("max_w")),
@@ -155,50 +169,60 @@ def main():
     ignore = {x.strip() for x in args.ignore.split(",") if x.strip()}
     drives = [d for d in drives if d["name"] not in ignore and d["addr"] not in ignore]
 
+    def label(d):
+        return "%s (slot %s)" % (d["name"], d["slot"]) if d.get("slot") else d["name"]
+
     rc = N_OK
-    bad_w, bad_s, unknown, lines = [], [], [], []
+    bad_w, bad_s, unknown = [], [], []
+    issues, lines = [], []   # issues: short text per bad drive for the summary
     for d in drives:
         if "error" in d or not d["dev"]["cur_w"] or not d["exp_w"]:
             unknown.append(d)
-            lines.append("%s %s: link state unreadable (link down?)"
-                         % (d["name"], d.get("addr")))
+            issues.append("%s: link state unreadable" % label(d))
+            lines.append("[WARNING] %s: link state unreadable (link down?), PCI %s"
+                         % (label(d), d.get("addr")))
             continue
-        cur = fmt(d["dev"]["cur_s"], d["dev"]["cur_w"])
-        exp = fmt(d["exp_s"], d["exp_w"])
-        desc = "%s %s (%s): %s, expected %s" % (d["name"], d["addr"], d["model"], cur, exp)
-        if d["dev"]["cur_w"] < d["exp_w"]:
+        cur_w, cur_s = d["dev"]["cur_w"], d["dev"]["cur_s"]
+        narrow = cur_w < d["exp_w"]
+        slow = (not args.ignore_speed and d["exp_s"] and cur_s and cur_s < d["exp_s"])
+        what = []
+        if narrow:
             bad_w.append(d)
-            lines.append("[%s] %s" % ("WARNING" if args.width_warn else "CRITICAL", desc))
-        elif (not args.ignore_speed and d["exp_s"] and d["dev"]["cur_s"]
-              and d["dev"]["cur_s"] < d["exp_s"]):
+            what.append("x%d instead of x%d" % (cur_w, d["exp_w"]))
+        if slow:
             bad_s.append(d)
-            lines.append("[WARNING] %s" % desc)
+            what.append("%s instead of %s" % (fmt(cur_s, None).split()[0],
+                                              fmt(d["exp_s"], None).split()[0]))
+        detail = "%s, PCI %s" % (d["model"], d["addr"])
+        if narrow or slow:
+            st = "WARNING" if (not narrow or args.width_warn) else "CRITICAL"
+            pct = ""
+            if cur_s and d["exp_s"]:
+                pct = ", ~%d%% bandwidth" % round(100.0 * cur_w * cur_s / (d["exp_w"] * d["exp_s"]))
+            issues.append("%s: %s" % (label(d), " and ".join(what)))
+            lines.append("[%s] %s: %s instead of %s%s - %s" % (
+                st, label(d), fmt(cur_s, cur_w), fmt(d["exp_s"], d["exp_w"]), pct, detail))
         elif args.verbose:
-            lines.append("[OK] %s" % desc)
+            lines.append("[OK] %s: %s - %s" % (label(d), fmt(cur_s, cur_w), detail))
 
     if bad_w:
         rc = max(rc, N_WARN if args.width_warn else N_CRIT)
     if bad_s or unknown:
         rc = max(rc, N_WARN)
-    if args.min_drives and len(drives) < args.min_drives:
+    missing = args.min_drives and len(drives) < args.min_drives
+    if missing:
         rc = N_CRIT
 
-    def short(lst):
-        return ", ".join("%s x%s/x%s" % (d["name"], d["dev"]["cur_w"], d["exp_w"]) for d in lst)
-
     parts = []
-    if bad_w:
-        parts.append("%d with fewer PCIe lanes: %s" % (len(bad_w), short(bad_w)))
-    if bad_s:
-        parts.append("%d with lower PCIe speed: %s" % (
-            len(bad_s), ", ".join("%s %s/%s" % (d["name"], fmt(d["dev"]["cur_s"], d["dev"]["cur_w"]),
-                                                fmt(d["exp_s"], d["exp_w"])) for d in bad_s)))
-    if unknown:
-        parts.append("%d unreadable: %s" % (len(unknown), ", ".join(d["name"] for d in unknown)))
-    if args.min_drives and len(drives) < args.min_drives:
-        parts.append("only %d NVMe drives, expected >= %d" % (len(drives), args.min_drives))
+    if len(issues) == 1:
+        parts.append("PCIe link degraded on %s" % issues[0])
+    elif issues:
+        parts.append("PCIe link degraded on %d NVMe drives: %s" % (len(issues), ", ".join(issues)))
+    if missing:
+        parts.append("found %d NVMe drives, expected at least %d" % (len(drives), args.min_drives))
     if not parts:
-        parts.append("all %d NVMe drives at full PCIe link" % len(drives))
+        parts.append("1 NVMe drive at full PCIe link" if len(drives) == 1
+                     else "all %d NVMe drives at full PCIe link" % len(drives))
 
     perf = "drives=%d;;%s degraded_width=%d degraded_speed=%d" % (
         len(drives), args.min_drives or "", len(bad_w), len(bad_s))
