@@ -9,7 +9,7 @@
 # Modifications : Thomas Widhalm, NETways GmbH
 # E-Mail: widhalmt@widhalm.or.at
 #
-# Version: 1.0.2
+# Version: 1.0.3
 #
 # This program is free software; you can redistribute it or modify
 # it under the terms of the GNU General Public License version 3.0
@@ -17,16 +17,19 @@
 # Changelog:
 # 	- 1.0.1 remove 'error' tapes from expire check and correct the help description 
 #	- 1.0.2 start to rework for chosing correct query for the database type (MySQL -vs - PostgreSQL)
+#	- 1.0.3 password via file/env (not argv), -P port, lazy MySQLdb import, --version fixed
+#	        backported from NETWAYS check_bareos v2.1.1; stays Python 2 (CentOS 7 host)
 #
 #
 # Plugin check for icinga
 # ---------------------------------------------------- #
 import argparse
+import os
 import psycopg2
 import psycopg2.extras
 import sys
 import subprocess
-import MySQLdb 
+# MySQLdb imported lazily in connectDB - not installed on psql-only hosts
 
 # Variables
 databaseName = 'bareos'
@@ -464,13 +467,31 @@ def checkEmptyTapes(courser, warning, critical):
 
 
 
-def connectDB(userName, pw, hostName, database):
+def readPasswordFromFile(path):
+    # First line only; keeps the password out of argv and ps
+    try:
+        f = open(path, 'r')
+        try:
+            return f.readline().rstrip('\r\n')
+        finally:
+            f.close()
+    except IOError, e:
+        checkState = {}
+        checkState["returnCode"] = 3
+        checkState["returnMessage"] = "UNKNOWN - cannot read password file: " + str(e)
+        checkState["performanceData"] = ";;;;"
+        printNagiosOutput(checkState)
+
+
+def connectDB(userName, pw, hostName, database, port=None):
     if(database == "postgresql" or database == "p" or database == "psql"):
         global databaseType
         databaseType = 'psql'
         try:
             # Define our connection string
             connString = "host='" + hostName + "' dbname='" + databaseName + "' user='" + userName + "' password='" + pw + "'"
+            if port:
+                connString += " port='" + str(port) + "'"
             # get a connection, if a connect cannot be made an exception will be raised here
             conn = psycopg2.connect(connString)
             # conn.cursor will return a cursor object, you can use this cursor to perform queries
@@ -485,8 +506,12 @@ def connectDB(userName, pw, hostName, database):
             printNagiosOutput(checkState)
          
     if(database == "mysql" or database == "m"):
+        import MySQLdb
         try:
-            conn = MySQLdb.connect(host=hostName, user=userName, passwd=pw, db=databaseName)
+            if port:
+                conn = MySQLdb.connect(host=hostName, user=userName, passwd=pw, db=databaseName, port=int(port))
+            else:
+                conn = MySQLdb.connect(host=hostName, user=userName, passwd=pw, db=databaseName)
             return conn.cursor() 
         except MySQLdb.Error, e:
                         checkState = {}
@@ -507,9 +532,14 @@ def argumentParser():
     parser = argparse.ArgumentParser(description='Check status of the bareos backups')
     group = parser.add_argument_group();
     group.add_argument('-u', '--user', dest='user', action='store', required=True, help='user name for the database connections')
-    group.add_argument('-p', '--password', dest='password', action='store', help='password for the database connections', default="")
+    group.add_argument('-p', '--password', dest='password', action='store',
+                       help='password for the database connections (INSECURE: visible in ps; prefer --password-file or CHECK_BAREOS_DATABASE_PASSWORD)',
+                       default=os.environ.get('CHECK_BAREOS_DATABASE_PASSWORD', ''))
+    group.add_argument('--password-file', dest='password_file', action='store',
+                       help='file whose first line is the database password')
     group.add_argument('-H', '--Host', dest='host', action='store', help='database host', default="127.0.0.1")
-    group.add_argument('-v', '--version', action='version', version='%(prog)s 1.0.0')
+    group.add_argument('-P', '--port', dest='port', action='store', help='database port', default=None)
+    group.add_argument('-v', '--version', action='version', version='%(prog)s 1.0.3')
     parser.add_argument('-d', '--database', dest='database', choices=['mysql', 'm', 'postgresql', 'p', 'psql'], default='mysql', help='the database kind for the database connection (m=mysql, p=psql) (Default=Mysql)')
     
     subParser = parser.add_subparsers()
@@ -574,7 +604,7 @@ def checkConnection(cursor):
         return True
 
 def checkTape(args):
-    cursor = connectDB(args.user, args.password, args.host, args.database);
+    cursor = connectDB(args.user, args.password, args.host, args.database, args.port);
     checkResult = {}
     if checkConnection(cursor):     
         if args.emptyTapes:
@@ -592,7 +622,7 @@ def checkTape(args):
         
 
 def checkJob(args):
-    cursor = connectDB(args.user, args.password, args.host, args.database);
+    cursor = connectDB(args.user, args.password, args.host, args.database, args.port);
     checkResult = {}
     if checkConnection(cursor):  
         if args.checkJob:
@@ -608,7 +638,7 @@ def checkJob(args):
 
        
 def checkStatus(args):
-    cursor = connectDB(args.user, args.password, args.host, args.database);
+    cursor = connectDB(args.user, args.password, args.host, args.database, args.port);
     checkResult = {}
     if checkConnection(cursor):  
         if args.emptyBackups:
@@ -630,6 +660,9 @@ def checkStatus(args):
 if __name__ == '__main__':
     parser = argumentParser()
     args = parser.parse_args()
+    # File wins over -p/env so credentials stay out of argv
+    if getattr(args, 'password_file', None):
+        args.password = readPasswordFromFile(args.password_file)
     # print parser.parse_args()
     args.func(args)
     # Get a cursor for the specific database connection
