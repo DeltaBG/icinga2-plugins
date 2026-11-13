@@ -70,6 +70,3 @@ Perfdata: `no_reply`, `stopped_reply`, `host_queue_unconsumed`, `host_queue_msgs
 `processes`.
 
 A bad `--host-regex` or an empty `--topics` gives UNKNOWN.
-
-Tests (synthetic rabbitmqctl output, no cluster needed):
-`python3 -m unittest discover -s openstack-plugins/tests`
