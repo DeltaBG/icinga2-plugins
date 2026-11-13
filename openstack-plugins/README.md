@@ -70,3 +70,30 @@ Perfdata: `no_reply`, `stopped_reply`, `host_queue_unconsumed`, `host_queue_msgs
 `processes`.
 
 A bad `--host-regex` or an empty `--topics` gives UNKNOWN.
+
+## check_openstack_provisions.py
+
+Cloud-wide OpenStack consistency checks, one `--monitor` per Icinga service:
+
+| Monitor     | Looks for                                                              |
+|-------------|------------------------------------------------------------------------|
+| `volumes`   | volumes in error states, unattached or without a project               |
+| `ports`     | ports DOWN while attached, admin-down but bound, detached with IPs     |
+| `servers`   | servers in error/rescued, or stopped/paused/shelved for long           |
+| `snapshots` | snapshots in error states, or left available                           |
+| `ram`/`cpu` | allocation % per hypervisor, down or disabled hypervisors              |
+| `quota`     | per-project quota vs usage (1:1 projects, usage % for the rest)        |
+
+Python 3, needs `openstacksdk`, `munch`, `prettytable` (and `pyyaml` for `--thresholds-file`).
+Credentials come from the standard OpenStack client config via `--cloud NAME`, or from
+`OS_CLOUD` / `OS_*` environment. Admin rights are needed for the cloud-wide views.
+
+```text
+check_openstack_provisions.py --cloud mycloud --monitor ram --warning 85 --critical 95
+check_openstack_provisions.py --cloud mycloud --monitor quota \
+    --quota-strict-pattern '^fixed-' --quota-scope strict --warning 0 --critical 0
+```
+
+`--help` lists every monitor's alert conditions, filters (`--include-ids`, `--exclude-ids`,
+`--days`) and the API cost of each option. Per-project ram/cpu thresholds:
+[`examples/thresholds-per-project.yaml`](examples/thresholds-per-project.yaml).

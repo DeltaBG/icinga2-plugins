@@ -1,0 +1,22 @@
+# Example per-project threshold file: --monitor ram|cpu --thresholds-file FILE
+# Values are allocation %; 0 disables a level. Hosts map to projects
+# automatically via Nova aggregates (filter_tenant_id); priority per kind:
+# projects:<name> > defaults: > CLI --warning/--critical (strictest wins if a host has several projects).
+
+# Applied to any project with no explicit entry below.
+
+defaults:
+  ram:
+    warning: 90
+    critical: 95
+  cpu:
+    warning: 0
+    critical: 0
+
+# Per-project overrides by name (or ID); omitted kinds fall back to defaults:.
+projects:
+  # stricter RAM ceiling; cpu inherits defaults
+  example-project:
+    ram:
+      warning: 80
+      critical: 90
